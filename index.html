@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+　　<meta name="robots" content="noindex">
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>大会記録アプリ</title>
+    <style>
+        /* シンプルで見やすいスタイル */
+        body { font-family: sans-serif; margin: 0; padding: 10px; background-color: #f4f4f4; }
+        .container { max-width: 600px; margin: 0 auto; background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
+        
+        /* タブ切り替え */
+        .tabs { display: flex; margin-bottom: 20px; border-bottom: 2px solid #ddd; }
+        .tab-btn { flex: 1; padding: 10px; border: none; background: none; cursor: pointer; font-weight: bold; color: #666; }
+        .tab-btn.active { color: #007bff; border-bottom: 2px solid #007bff; }
+        .page { display: none; }
+        .page.active { display: block; animation: fadeIn 0.3s; }
+
+        /* フォーム要素 */
+        label { display: block; margin-top: 10px; font-weight: bold; font-size: 0.9em; }
+        input, select, textarea { width: 100%; padding: 10px; margin-top: 5px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; }
+        button { width: 100%; padding: 12px; margin-top: 20px; background-color: #007bff; color: white; border: none; border-radius: 4px; font-size: 16px; cursor: pointer; }
+        button:hover { background-color: #0056b3; }
+        button.secondary { background-color: #6c757d; }
+
+        /* リスト表示 */
+        .record-card { border: 1px solid #ddd; padding: 10px; margin-top: 10px; border-radius: 4px; background: #fafafa; }
+        .record-header { display: flex; justify-content: space-between; font-size: 0.8em; color: #888; }
+        .record-title { font-weight: bold; margin: 5px 0; }
+        .match-badge { padding: 2px 6px; border-radius: 4px; font-size: 0.8em; color: white; }
+        .bg-blue { background-color: #007bff; } /* 対戦 */
+        .bg-green { background-color: #28a745; } /* 観戦 */
+
+        /* ローディング */
+        #loading { text-align: center; color: #666; margin-top: 20px; }
+
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <div class="tabs">
+        <button class="tab-btn active" onclick="showPage('input')">入力</button>
+        <button class="tab-btn" onclick="showPage('search')">検索・閲覧</button>
+        <button class="tab-btn" onclick="showPage('register')">設定</button>
+    </div>
+
+    <div id="loading">データを読み込んでいます...</div>
+
+    <div id="page-input" class="page active">
+        <label>日付</label>
+        <input type="date" id="input-date" readonly>
+
+        <label>区分</label>
+        <select id="input-type">
+            <option value="対戦">対戦⚔</option>
+            <option value="観戦">観戦👀</option>
+        </select>
+
+        <label>相手プレイヤー名 (検索可能)</label>
+        <input type="text" id="input-opponent" list="player-list" placeholder="名前を入力または選択">
+        <datalist id="player-list"></datalist>
+
+        <label>概要 (使用キャラ、デッキ等)</label>
+        <input type="text" id="input-summary" placeholder="例:過去、LO">
+
+        <label>詳細メモ</label>
+        <textarea id="input-note" rows="6" placeholder="採用カードや枚数、勝因など"></textarea>
+
+        <button onclick="submitRecord()">送信する</button>
+    </div>
+
+    <div id="page-search" class="page">
+        <label>日付で絞り込み</label>
+        <select id="search-date" onchange="filterRecords()">
+            <option value="all">全日程</option>
+        </select>
+
+        <label>プレイヤー名で絞り込み</label>
+        <select id="search-player" onchange="filterRecords()">
+            <option value="all">全員</option>
+        </select>
+
+        <div id="records-container">
+            </div>
+    </div>
+
+    <div id="page-register" class="page">
+        <h3>プレイヤー登録</h3>
+        <p style="font-size:0.9em; color:#666;">
+            Tonamelの参加者一覧などをコピーして、ここに貼り付けてください。<br>
+            (改行区切りで複数一括登録できます)
+        </p>
+        <textarea id="reg-names" rows="10" placeholder="選手A&#13;選手B&#13;選手C..."></textarea>
+        <button onclick="registerPlayers()" class="secondary">リストに登録</button>
+    </div>
+</div>
+
+<script>
+    // ★★★ここにGASのウェブアプリURLを貼り付けてください★★★
+    const GAS_URL = "https://script.google.com/macros/s/AKfycbyP25ibEiHY4GQKihuEikxNA5qZWim-5V4UYYHy0uefsKxc29_Hg1j0iV5micfddMiF/exec";
+
+    // 内部データ保持用
+    let allRecords = [];
+    let allPlayers = [];
+
+    // 初期化処理
+    window.onload = async function() {
+        // 今日の日付をセット
+        document.getElementById('input-date').valueAsDate = new Date();
+        
+        // データの取得
+        await fetchData();
+    };
+
+    // 画面切り替え
+    function showPage(pageName) {
+        document.querySelectorAll('.page').forEach(el => el.classList.remove('active'));
+        document.querySelectorAll('.tab-btn').forEach(el => el.classList.remove('active'));
+        document.getElementById('page-' + pageName).classList.add('active');
+        // タブボタンのスタイル制御は簡易的に実装（ボタン順序に依存しない形に調整可）
+        event.target.classList.add('active');
+    }
+
+    // データ取得 (GAS -> 画面)
+    async function fetchData() {
+        document.getElementById('loading').style.display = 'block';
+        try {
+            const res = await fetch(GAS_URL);
+            const data = await res.json();
+            
+            allPlayers = data.players;
+            allRecords = data.records;
+
+            updatePlayerDropdowns();
+            updateDateDropdown();
+            filterRecords(); // 一覧更新
+
+        } catch (e) {
+            alert("データ読み込み失敗: " + e);
+        } finally {
+            document.getElementById('loading').style.display = 'none';
+        }
+    }
+
+    // [1] 送信処理
+    async function submitRecord() {
+        const btn = event.target;
+        btn.disabled = true;
+        btn.innerText = "送信中...";
+
+        const payload = {
+            action: "register_record",
+            date: document.getElementById('input-date').value,
+            match_type: document.getElementById('input-type').value,
+            opponent: document.getElementById('input-opponent').value,
+            summary: document.getElementById('input-summary').value,
+            note: document.getElementById('input-note').value
+        };
+
+        if(!payload.opponent) {
+            alert("プレイヤー名を入力してください");
+            btn.disabled = false; btn.innerText = "送信する";
+            return;
+        }
+
+        try {
+            await fetch(GAS_URL, {
+                method: "POST",
+                body: JSON.stringify(payload)
+            });
+            alert("記録しました！");
+            // 入力欄クリア
+            document.getElementById('input-opponent').value = "";
+            document.getElementById('input-summary').value = "";
+            document.getElementById('input-note').value = "";
+            
+            // データを再読み込みして最新にする
+            fetchData();
+
+        } catch (e) {
+            alert("送信エラー: " + e);
+        } finally {
+            btn.disabled = false;
+            btn.innerText = "送信する";
+        }
+    }
+
+    // [3] プレイヤー一括登録
+    async function registerPlayers() {
+        const text = document.getElementById('reg-names').value;
+        if(!text) return;
+        
+        if(!confirm("入力された名前をリストに追加しますか？")) return;
+
+        const names = text.split(/\n/).map(s => s.trim()).filter(Boolean);
+        
+        try {
+            const res = await fetch(GAS_URL, {
+                method: "POST",
+                body: JSON.stringify({
+                    action: "register_players",
+                    names: names
+                })
+            });
+            const json = await res.json();
+            alert(json.message);
+            document.getElementById('reg-names').value = "";
+            fetchData(); // リスト更新
+        } catch(e) {
+            alert("登録エラー: " + e);
+        }
+    }
+
+    // UI更新系: プレイヤーリスト
+    function updatePlayerDropdowns() {
+        // 入力画面の候補リスト
+        const datalist = document.getElementById('player-list');
+        datalist.innerHTML = "";
+        allPlayers.forEach(p => {
+            const opt = document.createElement('option');
+            opt.value = p;
+            datalist.appendChild(opt);
+        });
+
+        // 検索画面のプルダウン
+        const searchSelect = document.getElementById('search-player');
+        // "全員"以外を一度削除
+        while (searchSelect.options.length > 1) searchSelect.remove(1);
+        
+        allPlayers.forEach(p => {
+            const opt = document.createElement('option');
+            opt.value = p;
+            opt.text = p;
+            searchSelect.add(opt);
+        });
+    }
+
+    // UI更新系: 日付プルダウン（データにある日付のみ抽出）
+    function updateDateDropdown() {
+        const dates = [...new Set(allRecords.map(r => r.date))].sort();
+        const select = document.getElementById('search-date');
+        while (select.options.length > 1) select.remove(1);
+
+        dates.forEach(d => {
+            const opt = document.createElement('option');
+            opt.value = d;
+            opt.text = d;
+            select.add(opt);
+        });
+    }
+
+    // 検索・表示処理
+    function filterRecords() {
+        const dateVal = document.getElementById('search-date').value;
+        const playerVal = document.getElementById('search-player').value;
+        const container = document.getElementById('records-container');
+        container.innerHTML = "";
+
+        const filtered = allRecords.filter(r => {
+            const matchDate = (dateVal === 'all') || (r.date === dateVal);
+            const matchPlayer = (playerVal === 'all') || (r.opponent === playerVal);
+            return matchDate && matchPlayer;
+        });
+
+        if (filtered.length === 0) {
+            container.innerHTML = "<p style='text-align:center; color:#999;'>データがありません</p>";
+            return;
+        }
+
+        filtered.forEach(r => {
+            const badgeClass = r.match_type === '対戦' ? 'bg-blue' : 'bg-green';
+            const html = `
+                <div class="record-card">
+                    <div class="record-header">
+                        <span>${r.date}</span>
+                        <span class="match-badge ${badgeClass}">${r.match_type}</span>
+                    </div>
+                    <div class="record-title">VS ${r.opponent}</div>
+                    <div style="font-size:0.9em; margin-bottom:5px;">${r.summary}</div>
+                    <div style="font-size:0.85em; color:#555; white-space: pre-wrap;">${r.note}</div>
+                </div>
+            `;
+            container.innerHTML += html;
+        });
+    }
+</script>
+
+</body>
+</html>
