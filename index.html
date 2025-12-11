@@ -5,39 +5,31 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>大会記録アプリ</title>
     <style>
-        /* シンプルで見やすいスタイル */
         body { font-family: sans-serif; margin: 0; padding: 10px; background-color: #f4f4f4; }
         .container { max-width: 600px; margin: 0 auto; background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
         
-        /* タブ切り替え */
         .tabs { display: flex; margin-bottom: 20px; border-bottom: 2px solid #ddd; }
         .tab-btn { flex: 1; padding: 10px; border: none; background: none; cursor: pointer; font-weight: bold; color: #666; }
         .tab-btn.active { color: #007bff; border-bottom: 2px solid #007bff; }
         .page { display: none; }
         .page.active { display: block; animation: fadeIn 0.3s; }
 
-        /* フォーム要素 */
         label { display: block; margin-top: 10px; font-weight: bold; font-size: 0.9em; }
         input, select, textarea { width: 100%; padding: 10px; margin-top: 5px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; }
         button { width: 100%; padding: 12px; margin-top: 20px; background-color: #007bff; color: white; border: none; border-radius: 4px; font-size: 16px; cursor: pointer; }
         button:hover { background-color: #0056b3; }
         button.secondary { background-color: #6c757d; }
 
-        /* リスト表示 */
         .record-card { border: 1px solid #ddd; padding: 10px; margin-top: 10px; border-radius: 4px; background: #fafafa; }
         .record-header { display: flex; justify-content: space-between; font-size: 0.8em; color: #888; }
         .record-title { font-weight: bold; margin: 5px 0; }
         .match-badge { padding: 2px 6px; border-radius: 4px; font-size: 0.8em; color: white; }
         
-        /* バッジの色分け */
         .bg-blue { background-color: #007bff; }   /* 対戦 */
         .bg-green { background-color: #28a745; }  /* 観戦 */
         .bg-orange { background-color: #fd7e14; } /* 事前情報 */
 
-        /* ローディング */
         #loading { text-align: center; color: #666; margin-top: 20px; }
-
-        /* 検索ヒットなし */
         .no-data { text-align: center; color: #999; margin-top: 20px; }
 
         @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
@@ -61,7 +53,7 @@
 
         <label>区分</label>
         <select id="input-type">
-            <option value="対戦⚔">対戦⚔</option>
+            <option value="対戦⚔️">対戦⚔️</option>
             <option value="観戦👀">観戦👀</option>
             <option value="事前情報🔎">事前情報🔎</option>
         </select>
@@ -86,12 +78,10 @@
         </select>
 
         <label>プレイヤー名で絞り込み</label>
-        <select id="search-player" onchange="filterRecords()">
-            <option value="all">全員</option>
-        </select>
+        <input type="text" id="search-player" list="player-list-search" placeholder="名前を入力（空欄で全員）" oninput="filterRecords()">
+        <datalist id="player-list-search"></datalist>
 
-        <div id="records-container">
-            </div>
+        <div id="records-container"></div>
     </div>
 
     <div id="page-register" class="page">
@@ -109,17 +99,14 @@
     // ★★★ここにGASのウェブアプリURLを貼り付けてください★★★
     const GAS_URL = "https://script.google.com/macros/s/AKfycbyP25ibEiHY4GQKihuEikxNA5qZWim-5V4UYYHy0uefsKxc29_Hg1j0iV5micfddMiF/exec";
 
-    // 内部データ保持用
     let allRecords = [];
     let allPlayers = [];
 
-    // 初期化処理
     window.onload = async function() {
         document.getElementById('input-date').valueAsDate = new Date();
         await fetchData();
     };
 
-    // 画面切り替え
     function showPage(pageName) {
         document.querySelectorAll('.page').forEach(el => el.classList.remove('active'));
         document.querySelectorAll('.tab-btn').forEach(el => el.classList.remove('active'));
@@ -127,7 +114,6 @@
         event.target.classList.add('active');
     }
 
-    // データ取得 (GAS -> 画面)
     async function fetchData() {
         document.getElementById('loading').style.display = 'block';
         try {
@@ -151,6 +137,21 @@
     // [1] 送信処理
     async function submitRecord() {
         const btn = event.target;
+        const opponentName = document.getElementById('input-opponent').value.trim();
+
+        if(!opponentName) {
+            alert("プレイヤー名を入力してください");
+            return;
+        }
+
+        // ★改良: 未登録プレイヤーの確認ロジック
+        let confirmMsg = "記録を送信しますか？";
+        if (!allPlayers.includes(opponentName)) {
+            confirmMsg = `【注意】\n「${opponentName}」は名簿に登録されていません。\n\nこのまま送信すると、新規プレイヤーとして名簿に追加されます。\nよろしいですか？`;
+        }
+
+        if(!confirm(confirmMsg)) return;
+
         btn.disabled = true;
         btn.innerText = "送信中...";
 
@@ -158,16 +159,10 @@
             action: "register_record",
             date: document.getElementById('input-date').value,
             match_type: document.getElementById('input-type').value,
-            opponent: document.getElementById('input-opponent').value,
+            opponent: opponentName,
             summary: document.getElementById('input-summary').value,
             note: document.getElementById('input-note').value
         };
-
-        if(!payload.opponent) {
-            alert("プレイヤー名を入力してください");
-            btn.disabled = false; btn.innerText = "送信する";
-            return;
-        }
 
         try {
             await fetch(GAS_URL, {
@@ -175,12 +170,11 @@
                 body: JSON.stringify(payload)
             });
             alert("記録しました！");
-            // 入力欄クリア
+            
             document.getElementById('input-opponent').value = "";
             document.getElementById('input-summary').value = "";
             document.getElementById('input-note').value = "";
             
-            // 最新データ再取得
             fetchData();
 
         } catch (e) {
@@ -191,7 +185,6 @@
         }
     }
 
-    // [3] プレイヤー一括登録
     async function registerPlayers() {
         const text = document.getElementById('reg-names').value;
         if(!text) return;
@@ -217,36 +210,24 @@
         }
     }
 
-    // UI更新系: プレイヤーリスト
     function updatePlayerDropdowns() {
-        const datalist = document.getElementById('player-list');
-        datalist.innerHTML = "";
+        // 入力画面用
+        const inputList = document.getElementById('player-list');
+        inputList.innerHTML = "";
+        
+        // 検索画面用
+        const searchList = document.getElementById('player-list-search');
+        searchList.innerHTML = "";
+
         allPlayers.forEach(p => {
             const opt = document.createElement('option');
             opt.value = p;
-            datalist.appendChild(opt);
+            inputList.appendChild(opt.cloneNode(true));
+            searchList.appendChild(opt.cloneNode(true));
         });
-
-        const searchSelect = document.getElementById('search-player');
-        // 現在の選択値を保持しておく
-        const currentVal = searchSelect.value;
-        
-        while (searchSelect.options.length > 1) searchSelect.remove(1);
-        
-        allPlayers.forEach(p => {
-            const opt = document.createElement('option');
-            opt.value = p;
-            opt.text = p;
-            searchSelect.add(opt);
-        });
-
-        // 可能なら選択状態を戻す
-        searchSelect.value = currentVal;
     }
 
-    // UI更新系: 日付プルダウン
     function updateDateDropdown() {
-        // 日付一覧を取得（重複排除）
         const dates = [...new Set(allRecords.map(r => r.date))].sort();
         const select = document.getElementById('search-date');
         const currentVal = select.value;
@@ -262,19 +243,18 @@
         select.value = currentVal;
     }
 
-    // 検索・表示処理（フィルタリング）
     function filterRecords() {
         const dateVal = document.getElementById('search-date').value;
-        const playerVal = document.getElementById('search-player').value;
+        const playerVal = document.getElementById('search-player').value.trim(); // テキスト入力を取得
         const container = document.getElementById('records-container');
         container.innerHTML = "";
 
         const filtered = allRecords.filter(r => {
-            // ★改良: 「事前情報」が含まれる場合は日付フィルタを無視する
             const isInfo = r.match_type.includes('事前情報');
             const matchDate = (dateVal === 'all') || (r.date === dateVal) || isInfo;
             
-            const matchPlayer = (playerVal === 'all') || (r.opponent === playerVal);
+            // ★改良: 入力が空なら全員、文字があれば一致判定
+            const matchPlayer = (playerVal === '') || (r.opponent === playerVal);
             return matchDate && matchPlayer;
         });
 
@@ -284,11 +264,10 @@
         }
 
         filtered.forEach(r => {
-            // バッジの色判定
             let badgeClass = '';
             if (r.match_type.includes('対戦')) badgeClass = 'bg-blue';
             else if (r.match_type.includes('観戦')) badgeClass = 'bg-green';
-            else badgeClass = 'bg-orange'; // 事前情報
+            else badgeClass = 'bg-orange';
 
             const html = `
                 <div class="record-card">
