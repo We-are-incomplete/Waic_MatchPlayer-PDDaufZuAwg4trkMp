@@ -1,7 +1,6 @@
 <!DOCTYPE html>
 <html lang="ja">
 <head>
-　　<meta name="robots" content="noindex">
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>大会記録アプリ</title>
@@ -29,14 +28,21 @@
         .record-header { display: flex; justify-content: space-between; font-size: 0.8em; color: #888; }
         .record-title { font-weight: bold; margin: 5px 0; }
         .match-badge { padding: 2px 6px; border-radius: 4px; font-size: 0.8em; color: white; }
-        .bg-blue { background-color: #007bff; } /* 対戦 */
-        .bg-green { background-color: #28a745; } /* 観戦 */
+        
+        /* バッジの色分け */
+        .bg-blue { background-color: #007bff; }   /* 対戦 */
+        .bg-green { background-color: #28a745; }  /* 観戦 */
+        .bg-orange { background-color: #fd7e14; } /* 事前情報 */
 
         /* ローディング */
         #loading { text-align: center; color: #666; margin-top: 20px; }
 
+        /* 検索ヒットなし */
+        .no-data { text-align: center; color: #999; margin-top: 20px; }
+
         @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
     </style>
+    <meta name="robots" content="noindex">
 </head>
 <body>
 
@@ -55,19 +61,20 @@
 
         <label>区分</label>
         <select id="input-type">
-            <option value="対戦">対戦⚔</option>
-            <option value="観戦">観戦👀</option>
+            <option value="対戦⚔️">対戦⚔️</option>
+            <option value="観戦👀">観戦👀</option>
+            <option value="事前情報🔎">事前情報🔎</option>
         </select>
 
         <label>相手プレイヤー名 (検索可能)</label>
         <input type="text" id="input-opponent" list="player-list" placeholder="名前を入力または選択">
         <datalist id="player-list"></datalist>
 
-        <label>概要 (使用キャラ、デッキ等)</label>
-        <input type="text" id="input-summary" placeholder="例:過去、LO">
+        <label>デッキ名</label>
+        <input type="text" id="input-summary" placeholder="例：過去、LO">
 
         <label>詳細メモ</label>
-        <textarea id="input-note" rows="6" placeholder="採用カードや枚数、勝因など"></textarea>
+        <textarea id="input-note" rows="4" placeholder="採用カードや枚数、注意点、勝因など"></textarea>
 
         <button onclick="submitRecord()">送信する</button>
     </div>
@@ -108,10 +115,7 @@
 
     // 初期化処理
     window.onload = async function() {
-        // 今日の日付をセット
         document.getElementById('input-date').valueAsDate = new Date();
-        
-        // データの取得
         await fetchData();
     };
 
@@ -120,7 +124,6 @@
         document.querySelectorAll('.page').forEach(el => el.classList.remove('active'));
         document.querySelectorAll('.tab-btn').forEach(el => el.classList.remove('active'));
         document.getElementById('page-' + pageName).classList.add('active');
-        // タブボタンのスタイル制御は簡易的に実装（ボタン順序に依存しない形に調整可）
         event.target.classList.add('active');
     }
 
@@ -136,7 +139,7 @@
 
             updatePlayerDropdowns();
             updateDateDropdown();
-            filterRecords(); // 一覧更新
+            filterRecords();
 
         } catch (e) {
             alert("データ読み込み失敗: " + e);
@@ -177,7 +180,7 @@
             document.getElementById('input-summary').value = "";
             document.getElementById('input-note').value = "";
             
-            // データを再読み込みして最新にする
+            // 最新データ再取得
             fetchData();
 
         } catch (e) {
@@ -208,7 +211,7 @@
             const json = await res.json();
             alert(json.message);
             document.getElementById('reg-names').value = "";
-            fetchData(); // リスト更新
+            fetchData();
         } catch(e) {
             alert("登録エラー: " + e);
         }
@@ -216,7 +219,6 @@
 
     // UI更新系: プレイヤーリスト
     function updatePlayerDropdowns() {
-        // 入力画面の候補リスト
         const datalist = document.getElementById('player-list');
         datalist.innerHTML = "";
         allPlayers.forEach(p => {
@@ -225,9 +227,10 @@
             datalist.appendChild(opt);
         });
 
-        // 検索画面のプルダウン
         const searchSelect = document.getElementById('search-player');
-        // "全員"以外を一度削除
+        // 現在の選択値を保持しておく
+        const currentVal = searchSelect.value;
+        
         while (searchSelect.options.length > 1) searchSelect.remove(1);
         
         allPlayers.forEach(p => {
@@ -236,12 +239,18 @@
             opt.text = p;
             searchSelect.add(opt);
         });
+
+        // 可能なら選択状態を戻す
+        searchSelect.value = currentVal;
     }
 
-    // UI更新系: 日付プルダウン（データにある日付のみ抽出）
+    // UI更新系: 日付プルダウン
     function updateDateDropdown() {
+        // 日付一覧を取得（重複排除）
         const dates = [...new Set(allRecords.map(r => r.date))].sort();
         const select = document.getElementById('search-date');
+        const currentVal = select.value;
+
         while (select.options.length > 1) select.remove(1);
 
         dates.forEach(d => {
@@ -250,9 +259,10 @@
             opt.text = d;
             select.add(opt);
         });
+        select.value = currentVal;
     }
 
-    // 検索・表示処理
+    // 検索・表示処理（フィルタリング）
     function filterRecords() {
         const dateVal = document.getElementById('search-date').value;
         const playerVal = document.getElementById('search-player').value;
@@ -260,18 +270,26 @@
         container.innerHTML = "";
 
         const filtered = allRecords.filter(r => {
-            const matchDate = (dateVal === 'all') || (r.date === dateVal);
+            // ★改良: 「事前情報」が含まれる場合は日付フィルタを無視する
+            const isInfo = r.match_type.includes('事前情報');
+            const matchDate = (dateVal === 'all') || (r.date === dateVal) || isInfo;
+            
             const matchPlayer = (playerVal === 'all') || (r.opponent === playerVal);
             return matchDate && matchPlayer;
         });
 
         if (filtered.length === 0) {
-            container.innerHTML = "<p style='text-align:center; color:#999;'>データがありません</p>";
+            container.innerHTML = "<div class='no-data'>データがありません</div>";
             return;
         }
 
         filtered.forEach(r => {
-            const badgeClass = r.match_type === '対戦' ? 'bg-blue' : 'bg-green';
+            // バッジの色判定
+            let badgeClass = '';
+            if (r.match_type.includes('対戦')) badgeClass = 'bg-blue';
+            else if (r.match_type.includes('観戦')) badgeClass = 'bg-green';
+            else badgeClass = 'bg-orange'; // 事前情報
+
             const html = `
                 <div class="record-card">
                     <div class="record-header">
@@ -279,7 +297,7 @@
                         <span class="match-badge ${badgeClass}">${r.match_type}</span>
                     </div>
                     <div class="record-title">VS ${r.opponent}</div>
-                    <div style="font-size:0.9em; margin-bottom:5px;">${r.summary}</div>
+                    <div style="font-size:0.9em; margin-bottom:5px; font-weight:bold;">${r.summary}</div>
                     <div style="font-size:0.85em; color:#555; white-space: pre-wrap;">${r.note}</div>
                 </div>
             `;
